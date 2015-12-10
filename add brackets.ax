@@ -1,0 +1,529 @@
+W 0 MICHAEL ANDREAE 991426042
+W 0 ***************************************************************
+W 0 THESE VALUES MUST BE AT THE START so the calculations will be correct
+W 0 ***************************************************************
+
+C '5'
+C '5'
+C '='
+C '='
+autofill: I 0
+
+W 37
+
+*mask: H 09000030
++mask: H 07000030
+W 1
+-mask: H 08000030
+W 1
+/mask: H 0A000030
+sec_number : W 1
+previous_number: W 1
+W 11
+=mask: H 0000003D  do cool stuff with this, auto branch to calculate...
+
+W 0 ***************************************************************
+W 0 END OF DIRECTLY REFERENCED MEMORY
+W 0 ***************************************************************
+
+W 0 ***************************************************************
+W 0 Takes numnbers into a equ array, calculates their value, and then returns a result
+W 0 Michael Andreae Nov 2015
+W 0 
+W 0 
+W 0 TEST CASES
+W 0 -6/-3 = 2.0
+W 0 1-2 = -1.0
+W 0 444444+2=444446.16 cool rounding error with floating points
+W 0 44.444=44.44
+W 0 100/12=08.33
+W 0 ONLY problem left is the 0.01 = 0.1 problem vs, long floats
+W 0
+W 0 STYLE NOTES
+W 0 checked w/ proff and 2. 2.0 2.000 are all acceptable (as long as it's 4 digits max)
+W 0 I'm not rounding 55.559 is 55.55, It just truncates
+W 0 ***************************************************************
+
+W 0 ***************************************************************
+W 0 NAMING CONVENTIONS
+W 0 Functions have two rows of * and a label starting FUNCITON [name]
+W 0 Memory addresses that are updated AND executed start with a ^
+W 0 ^L[] LDA []
+W 0 ^S[] STA [] etc...
+W 0 
+W 0 equ is the equations that will get calculated, turns into the stack once calculating
+W 0 
+W 0 SUBROUTINES are things taked onto the beginning of functions, run once to initialize
+W 0 All functions aren't quite nammed right, but it's 90%, appologies
+W 0 ***************************************************************
+
+
+W 0 ***************************************************************
+W 0 FLAGS
+W 0 ***************************************************************
+FLAGorderofop: I 0 performs order of operation calculations (not yet implemented)
+FLAGmultlineinp: I 1 allows multiple lines of input w/ return key
+FLAGautofill: I 0 2 auto fills, 0 asks for user input
+FLAGoutputcount: I 3 stores if n numbers have been put out (also change in reset)
+
+W 0 ***************************************************************
+W 0 CONSTANTS, not all used, many for various test purposes
+W 0 ***************************************************************
++ : H 2B Operators, plus
+- : H 2D
+* : H 2A
+/ : H 2F
+. : H 2E 
+= : I 61 the = sign
+bell: I 7 the noise character so know input
+C0: I 0
+C1: I 1
+C3: I 3
+C4: I 4
+C10: I 10
+C48: I 48  Subtract from user input to correct number to its value
+C100: I 100
+C1000 : I 1000
+C10000 : I 10000
+CE: C 'E'
+C_: C ' '
+NewLine: I 10
+
+CF-1: F -1
+CF.1: F 0.1
+CF.01: F 0.01
+CF0: F 0
+CF1: F 1
+CF3: F 3
+CF10: F 10
+CF100: F 100
+CF1000 : F 1000
+CF10000 : F 10000
+
+
+
+W 0 ***************************************************************
+W 0 Masks
+W 0 ***************************************************************
+
+picharminus: C'-'
+pichar0: I 48
+pimask: H 80000000 AND with float, Error 0 if negative
+
+W 0 ***************************************************************
+W 0 VARIABLES
+W 0 ***************************************************************
+
+pitoprint: W 1   
+piweight: I 1
+
+char: W 1 Input Characte being red
+acum: F 0 This accumulates the number as it's built
+
+Tchar: W 1
+
+rslt: W 1
+
+multiplyer: F 10 multiply input by this
+divider: F 0 divide number by this in the end
+
+AlreadyOperator : I 1
+NumbersSign : F 1
+
+elm_rnd : I 1 eliminate rounding
+
+outChar : C 'X'
+
+decimalPart: I 0
+wholePart: I 0
+rslt2: I 0
+
+W 0 ***************************************************************
+W 0 FUNCATION: MAIN, takes in user input and parses it into equ
+W 0 ***************************************************************
+
+main : 
+   BUN readloop
+
+readdecimal:
+   LDA .
+   OUT opsys
+   LDA CF1
+   STA divider
+readloop: 
+   LDA FLAGautofill
+   BSA FUNC_CHOOSER
+   INP opsys   
+   BUN noautofill
+
+   LDA C1
+   ADD addone
+   STA addone
+addone: I -1
+noautofill:
+   STA char
+
+   LDA char
+   XOR .
+   BZE readdecimal
+
+   LDA char
+   XOR -
+   BZE add-sign the - can be a sign or a negator, this solves that
+
+   LDA char THE = is bigger than the other operators so it would add as number
+   XOR =
+   BZE addsign
+
+   LDA char 
+
+   SUB C48
+   STA Tchar
+   AND pimask
+   BZE addnumber
+   BUN addsign positive
+addnumber:
+   LDA C10
+   SUB Tchar
+   AND pimask
+   BZE good_num
+   BUN readloop NaN
+good_num:
+   CIF Tchar
+   STA Tchar
+   LDA C0
+   STA AlreadyOperator treat - as operator if see it
+   LDA divider
+   FLM CF10
+   STA divider
+   LDA acum
+   FLM multiplyer
+   FLA Tchar
+   STA acum
+
+doneaddsign: W 0 SHOW CHARACTER   
+   LDA char
+
+   OUT opsys Shows character just entered
+   LDA bell
+   OUT opsys
+
+   LDA char
+   XOR =
+   BZE equ_preload WERE DONE GO CALCULATE
+   
+   BUN readloop NOT DONE LOOK FOR MORE NUMBERS
+
+
+W 0 ***************************************************************
+W 0 FUCTION add-sign, because - is a sign and a value, as in 5/-4 this checks it
+W 0 ***************************************************************
+
+add-sign : 
+   LDA C1
+   AND AlreadyOperator
+   BZE addsign Number Previously, this is an operator not a neg sign
+   LDA CF-1
+   FLM NumbersSign
+   STA NumbersSign
+   BUN doneaddsign
+
+W 0 ***************************************************************
+W 0 FUCTION addsign puts the acumulated value and the next operator
+W 0 ***************************************************************
+addsign : 
+   LDA char
+   STA operatorSave
+
+   
+   LDA acum
+   FLM NumbersSign
+   STA acum
+
+   LDA divider
+   IOR CF0
+   BZE wholenumber It's a whole number   
+   LDA acum 
+   FLD divider  
+   STA acum
+wholenumber : LDA acum
+^Sequ : STA equ
+   
+   LDA ^Sequ The pointer to the end of the equation
+   ADD C1
+   STA operator
+   LDA char
+
+operatorSave : W 1 THIS gets the operator code plus address
+
+operator : STA equ SAVES that to the next spot
+   LDA operator
+   
+   W 0 RESETS THE VARIOUS COUNTERS NOW THAT A NUMBER IS SAVED
+   ADD C1
+   STA ^Sequ
+   LDA CF0   
+   STA acum      
+   LDA CF10
+   STA multiplyer
+   LDA CF0
+   STA divider  
+
+   LDA C1
+   STA AlreadyOperator
+   LDA CF1
+   STA NumbersSign
+
+   BUN doneaddsign
+
+W 0 ***************************************************************
+W 0 SUB_ROUTINE equ_preload adds the first value from the equation to previous_number
+W 0 ***************************************************************
+equ_preload: LDA equ
+   STA previous_number   
+   LDA equ_preload 
+   ADD C1
+   STA ^Lequ
+
+W 0 ***************************************************************
+W 0 FUNCTION Lequ, evaluates the given equation, itterates twice to maintain OOP
+W 0 ***************************************************************
+^Lequ: LDA equ the equation to do, followed by the number.
+   STA current_operator
+   LDA current_operator
+   XOR =
+   BZE ^doneCalculating 
+
+   LDA ^Lequ
+   ADD C1
+   STA ^Lequ_2number NUMBER TO APPLY NEXT OPERAND TO
+   ADD C1
+   STA ^Lequ  ^Lequ NOW POINTS TO THE NEXT OPERATOR
+^Lequ_2number : LDA equ
+   STA sec_number         
+
+   LDA previous_number
+current_operator : W 1
+   BZE valid
+   BUN error
+
+valid : W 0 A calculated value is returned
+W 0 This is designed to be dynamic, but for our purposes the end of stack is always spot 1
+^Sadd_sum_to_stack : STA equ Stores return value on the end of the equation
+   STA previous_number Stores the result so can be calculated   
+   BUN  ^Lequ REPEAT
+
+
+W 0 ***************************************************************
+W 0 FUNCTION called if = is found, checks to see if another pass is needed
+W 0 ***************************************************************
+^doneCalculating : 
+
+   LDA ^Sadd_sum_to_stack 
+   ADD C1
+   STA ^Send_of_stack
+   LDA = This puts an = so it ends
+^Send_of_stack : W 1
+
+   LDA equ_pos_1 NOTE IF THIS IS =, THEN WE'VE GOT AN ANSWER
+   XOR =
+   BZE display_result Were done, = was in 1st position
+   BUN equ_preload Were not done, () or such left do it again
+
+
+W 0 ***************************************************************
+W 0 FUNCTION display_result shows the output
+W 0 finds the whole and decimal parts and prints as two seperate ints
+W 0 ***************************************************************
+display_result : LDA equ LOAD final number to print   
+
+   W 0 This is only so it will display partial calculations, remove 4 lines.
+   STA rslt
+   STA rslt2
+   XOR =
+   BZE opsys
+
+   LDA rslt
+   AND pimask   
+   BZE positive
+   
+   LDA rslt Its a negative number, make positive and add -
+   FLM CF-1
+   STA rslt
+   STA rslt2
+   LDA -
+   OUT opsys
+
+positive : W 0 We've now got a positive number
+
+   LDA rslt
+   FLM CF10000
+   STA rslt
+   CFI rslt
+   MOD C10000
+   STA decimalPart
+   CFI rslt
+   SUB decimalPart
+   DIV C10000
+   STA wholePart
+   BSA printint PRINT WHOLE NUMBER
+   
+   
+   W 0 *****************Print Decimal Part***************************
+
+   LDA FLAGoutputcount stops . from counting as a number
+   ADD C1
+   STA FLAGoutputcount
+
+   LDA doskip "prints a decimal instead of a 1"
+   STA charOr.ToScreen
+
+   CIF wholePart
+   STA wholePart
+   LDA rslt2  
+   FLA CF1
+   FLS wholePart
+   STA rslt2
+
+   
+
+   FLM CF10000
+
+   STA wholePart
+
+   LDA wholePart
+W 0 ************* PRINTS 
+   CFI wholePart
+   BSA printint
+   BUN restart
+    
+
+
+dontskip: LDA outChar
+doskip: LDA .
+
+
+W 0 ***************************************************************
+W 0 Restart the program
+W 0 ***************************************************************
+LOADrestart : BUN restart
+restart: LDA NewLine
+   OUT opsys
+
+   LDA ^Sadd_sum_to_stack
+   STA ^Sequ
+   LDA C4
+   STA FLAGoutputcount    
+   
+   LDA CF0
+   STA divider
+
+   LDA FLAGmultlineinp
+   BSA FUNC_CHOOSER
+   BUN opsys
+   BUN main
+
+
+W 0 ***************************************************************
+W 0 FUNCTION printint prints the accumulator to screen as an integer
+W 0 mondified only to remove the - sign and add a counter
+W 0 ***************************************************************
+printint: W 1  PRINTS AN INTEGER
+   STA pitoprint
+   AND pimask
+   BZE piwhile1
+
+   LDA C0   SUB pitoprint
+   STA pitoprint
+piwhile1: LDA pitoprint
+   DIV piweight
+   SUB C10
+   AND pimask
+   BZE pibody1
+   BUN piwhile2
+pibody1: LDA piweight
+   MUL C10
+   STA piweight
+   BUN piwhile1
+piwhile2: LDA pitoprint
+   DIV piweight
+   ADD pichar0
+   STA outChar
+
+   LDA FLAGoutputcount SKIPS if we're truncating
+   SUB C1
+   STA FLAGoutputcount
+   AND pimask
+   BZE charOr.ToScreen IF positve draw on screen
+   BUN skipone   
+
+charOr.ToScreen: LDA outChar this will be load . if decimal point needed 
+
+   OUT opsys
+
+skipone: 
+   LDA dontskip
+   STA charOr.ToScreen
+
+   LDA piweight
+   XOR C1
+   BZE pireturn
+   LDA pitoprint
+   MOD piweight
+   STA pitoprint
+   LDA piweight
+   DIV C10
+   STA piweight
+   BUN piwhile2
+pireturn: BIN printint
+
+W 0 ***************************************************************
+W 0 func_chooser loads accumulator lines after it was called, mostly used for flags
+W 0 ***************************************************************
+FUNC_CHOOSER: W 1
+   ADD FUNC_CHOOSER
+   STA FUNC_CHOOSER
+   BIN FUNC_CHOOSER
+
+W 0 ***************************************************************
+W 0 FUNCTION error rings the bell and restarts
+W 0 ***************************************************************
+LOADerror : BUN error
+error : LDA bell
+   OUT opsys
+   LDA CE   
+   OUT opsys
+   BUN restart
+
+
+W 0 ***************************************************************
+W 0 display to screen the accumulator and sets it back, uses CD for brackers
+W 0 ***************************************************************
+CC: C 'C'
+CD: C 'D'
+checknumber: W 1
+checkVAL: W 1
+   STA checknumber
+   LDA CC
+   OUT opsys
+
+   LDA checknumber
+   ADD pichar0
+   OUT opsys
+
+   LDA CD
+   OUT opsys
+   LDA checknumber
+   BIN checkVAL
+
+
+W 0 ***************************************************************
+W 0 ARRAY
+W 0 ***************************************************************
+
+
+
+equ : W 1 This is the equation that will be calculated
+equ_pos_1 : W 10 when this 2nd position is = stop
+
+
